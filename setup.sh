@@ -103,4 +103,10 @@ else
   echo "    rule already installed"
 fi
 
-say "Done. Launch the game with:  $HERE/funkeyone.sh"
+# ---- 8. application-menu entry ----------------------------------------------
+if [ -x "$HERE/install-menu.sh" ]; then
+  say "Adding the application-menu entry"
+  "$HERE/install-menu.sh" || warn "menu entry failed (non-fatal)"
+fi
+
+say "Done. Launch \"U.B. Funkeys\" from your menu, or run:  $HERE/funkeyone.sh"

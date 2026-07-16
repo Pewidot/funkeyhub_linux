@@ -58,8 +58,12 @@ cd funkeyone-linux
    `FlashReal.ocx`)
 6. drops `ninput.dll` into the game directory
 7. installs the udev rule so your user can open the portal (needs `sudo`)
+8. adds a **"U.B. Funkeys" entry to your application menu** (icon taken from the
+   game). Run `./install-menu.sh` on its own to (re)create it, or
+   `./install-menu.sh --remove` to remove it.
 
-After it finishes, **unplug and replug the portal once**, then:
+After it finishes, **unplug and replug the portal once**, then launch
+**U.B. Funkeys** from your application menu, or run:
 
 ```bash
 ./funkeyone.sh
