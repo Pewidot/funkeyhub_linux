@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
 # One-shot setup for running U.B. Funkeys (FunkeyOne) + the physical USB portal
-# on Arch Linux under Wine. Safe to re-run (idempotent).
+# on Linux under Wine. Works on Arch, Debian/Ubuntu, Fedora and openSUSE.
+# Safe to re-run (idempotent).
 #
 # What it does:
-#   1. checks system packages (wine, winetricks, libusb, gcc, mingw-w64-gcc)
+#   1. checks/installs system packages (wine, winetricks, libusb, gcc, mingw)
+#      — auto-detects pacman / apt / dnf / zypper
 #   2. sets up the Wine prefix with real .NET 4.8 (winetricks dotnet48)
 #   3. installs the game if not already installed (runs UBFunkeys-Setup-x64.exe)
 #   4. builds the USB libusb bridge (winelib) if the prebuilt one is absent
 #   5. swaps the Flash de-licensing shim into the game (Flash.ocx<->FlashReal.ocx)
 #   6. drops the ninput no-op stub into the game dir
+#  6b. marks MegaByte up to date (stops the driver-installer update from crashing)
 #   7. installs the udev rule (needs sudo) so your user can open the portal
+#      (with a group fallback for non-systemd distros)
+#   8. adds an application-menu entry
+#
+# Needs a recent Wine (11.x+, WoW64). Distros with an old Wine (e.g. Debian/
+# Ubuntu stable) should use the WineHQ repo: https://wiki.winehq.org/Download
 #
 # Run: ./setup.sh
 set -euo pipefail
@@ -18,20 +26,52 @@ say() { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
-# ---- 1. system packages ------------------------------------------------------
+# ---- 1. system packages (distro-agnostic) -----------------------------------
 say "Checking system packages"
-need_pkg=()
-for p in wine winetricks libusb gcc mingw-w64-gcc; do
-  pacman -Q "$p" >/dev/null 2>&1 || need_pkg+=("$p")
-done
-if ((${#need_pkg[@]})); then
-  warn "missing packages: ${need_pkg[*]}"
-  echo "    install them with:  sudo pacman -S --needed ${need_pkg[*]}"
-  echo "    (also enable the multilib repo if wine complains about 32-bit deps)"
-  read -rp "    install now with sudo? [y/N] " a
-  [[ "$a" == [yY] ]] && sudo pacman -S --needed "${need_pkg[@]}"
+
+if   command -v pacman  >/dev/null 2>&1; then PM=pacman
+elif command -v apt-get >/dev/null 2>&1; then PM=apt
+elif command -v dnf     >/dev/null 2>&1; then PM=dnf
+elif command -v zypper  >/dev/null 2>&1; then PM=zypper
+else PM=unknown; fi
+
+# package names per distro: wine, winetricks, libusb+headers, gcc, mingw,
+# and (dnf/zypper) the wine dev tools that provide winegcc.
+case "$PM" in
+  pacman) PKGS=(wine winetricks libusb gcc mingw-w64-gcc); PM_INSTALL=(sudo pacman -S --needed) ;;
+  apt)    PKGS=(wine winetricks libusb-1.0-0-dev gcc gcc-mingw-w64-x86-64); PM_INSTALL=(sudo apt-get install -y) ;;
+  dnf)    PKGS=(wine wine-devel winetricks libusb1-devel gcc mingw64-gcc); PM_INSTALL=(sudo dnf install -y) ;;
+  zypper) PKGS=(wine wine-devel winetricks libusb-1_0-devel gcc cross-x86_64-w64-mingw32-gcc); PM_INSTALL=(sudo zypper install -y) ;;
+  *)      PKGS=() ;;
+esac
+
+# probe for the tools/files we actually need (more reliable than package names)
+missing=()
+command -v wine       >/dev/null 2>&1 || missing+=("wine")
+command -v winetricks >/dev/null 2>&1 || missing+=("winetricks")
+command -v gcc        >/dev/null 2>&1 || missing+=("gcc")
+command -v winegcc    >/dev/null 2>&1 || missing+=("winegcc (wine dev tools)")
+command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || missing+=("mingw-w64 gcc")
+[ -f /usr/include/libusb-1.0/libusb.h ] || missing+=("libusb dev headers")
+
+if ((${#missing[@]})); then
+  warn "missing: ${missing[*]}"
+  if [ "$PM" = unknown ] || ((${#PKGS[@]}==0)); then
+    echo "    Unknown package manager — install manually: a recent Wine (incl. winegcc),"
+    echo "    winetricks, libusb + dev headers, gcc, and the mingw-w64 GCC cross-compiler."
+  else
+    echo "    install with:  ${PM_INSTALL[*]} ${PKGS[*]}"
+    [ "$PM" = apt ] && echo "    NOTE: Debian/Ubuntu often ship an old Wine — if the game misbehaves, use the WineHQ repo (https://wiki.winehq.org/Download)."
+    read -rp "    install now with sudo? [y/N] " a || a=n
+    if [[ "${a:-n}" == [yY] ]]; then
+      [ "$PM" = apt ] && { sudo apt-get update || true; }
+      "${PM_INSTALL[@]}" "${PKGS[@]}"
+    fi
+  fi
 fi
-command -v wine >/dev/null || die "wine not found"
+command -v wine >/dev/null 2>&1 || die "wine not found — install it and re-run."
+command -v winegcc >/dev/null 2>&1 || warn "winegcc missing — the USB bridge can't be built (install your distro's wine dev tools)."
+command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || warn "mingw missing — the Flash/ninput shims can't be built."
 
 export WINEPREFIX="${WINEPREFIX:-$HOME/.wine}"
 say "Using WINEPREFIX=$WINEPREFIX"
@@ -114,6 +154,19 @@ if [ ! -f /etc/udev/rules.d/70-funkeys-hub.rules ]; then
   echo "    (unplug and replug the portal once)"
 else
   echo "    rule already installed"
+fi
+# The rule's TAG+="uaccess" needs systemd-logind (or elogind) to grant your
+# login session the device ACL. On non-systemd distros it does nothing, so
+# point the user at a group-based fallback.
+if [ -d /run/systemd/system ] || command -v loginctl >/dev/null 2>&1; then
+  : # systemd-logind present — uaccess handles access
+else
+  warn "no systemd-logind detected — 'uaccess' won't grant portal access on this system."
+  echo "    Fix: install elogind, or use a group-based rule and join the group:"
+  echo "      echo 'SUBSYSTEM==\"usb\", ATTRS{idVendor}==\"0e4c\", ATTRS{idProduct}==\"7288\", MODE=\"0660\", GROUP=\"plugdev\"' | sudo tee /etc/udev/rules.d/70-funkeys-hub.rules"
+  echo "      sudo groupadd -f plugdev && sudo usermod -aG plugdev \"$USER\""
+  echo "      sudo udevadm control --reload-rules && sudo udevadm trigger --attr-match=idVendor=0e4c"
+  echo "      (then re-login and replug the portal)"
 fi
 
 # ---- 8. application-menu entry ----------------------------------------------

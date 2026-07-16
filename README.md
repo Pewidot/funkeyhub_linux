@@ -1,7 +1,7 @@
 # U.B. Funkeys (FunkeyOne) on Linux — Wine support kit
 
 Run the **FunkeyOne** U.B. Funkeys revival, *with a real physical USB portal*,
-on Arch Linux under Wine. This repo is the glue that makes the Windows game and
+on Linux under Wine. This repo is the glue that makes the Windows game and
 its hub work on Linux — it does **not** contain the game itself.
 
 The game embeds Adobe Flash via .NET WinForms and talks to the Radica USB
@@ -24,19 +24,30 @@ Wine. This kit provides three small shims plus a launcher that fix it:
 
 ## Requirements
 
-- **Arch Linux** (or derivative) with the **multilib** repo enabled
+- **Any mainstream Linux distro.** `setup.sh` auto-detects `pacman` / `apt` /
+  `dnf` / `zypper` and installs the right packages.
+- A **recent Wine (11.x+, WoW64)** — needed for .NET 4.8 + Flash. Rolling
+  distros (Arch, Fedora, openSUSE Tumbleweed) are fine; **Debian/Ubuntu stable
+  ship an old Wine**, so use the [WineHQ repo](https://wiki.winehq.org/Download)
+  there.
 - A Radica **U.B. Funkeys USB portal** (`0e4c:7288`) for hub features (the game
-  runs fine without one — you just can't scan physical Funkeys)
-- System packages:
+  runs fine without one — you just can't scan physical Funkeys).
+- **systemd-logind** for automatic portal access (nearly all desktop distros).
+  On non-systemd systems the setup prints a one-line group-based fallback.
 
-  ```bash
-  sudo pacman -S --needed wine winetricks libusb gcc mingw-w64-gcc
-  ```
+System packages (the setup offers to install these for you):
 
-  - `wine` + `winetricks` — run the game and install .NET
-  - `libusb` — the USB bridge forwards to it at runtime
-  - `gcc` + `mingw-w64-gcc` — build the shims (compiled locally; no binaries are
-    shipped)
+| Distro | Command |
+|--------|---------|
+| Arch | `sudo pacman -S --needed wine winetricks libusb gcc mingw-w64-gcc` |
+| Debian/Ubuntu | `sudo apt install wine winetricks libusb-1.0-0-dev gcc gcc-mingw-w64-x86-64` |
+| Fedora | `sudo dnf install wine wine-devel winetricks libusb1-devel gcc mingw64-gcc` |
+| openSUSE | `sudo zypper install wine wine-devel winetricks libusb-1_0-devel gcc cross-x86_64-w64-mingw32-gcc` |
+
+- `wine` (+ `winegcc` from it / `wine-devel`) — run the game, build the USB bridge
+- `winetricks` — installs .NET into the prefix
+- `libusb` (+ dev headers) — the USB bridge forwards to it
+- `gcc` + `mingw-w64` — build the shims locally (no binaries are shipped)
 
 ## Install
 
