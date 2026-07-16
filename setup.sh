@@ -91,6 +91,19 @@ say "Installing the ninput stub into the game dir"
 [ -f "$HERE/wineninput/ninput.dll" ] || ( cd "$HERE/wineninput" && ./build.sh )
 cp "$HERE/wineninput/ninput.dll" "$GAME_DIR/ninput.dll"
 
+# ---- 6b. neutralise the self-crashing MegaByte "update" ---------------------
+# The in-game updater checks HKCU\Software\OpenFK\FunkeyOne\MegaByteVersion. On
+# a fresh install that value is missing, so it reads as "0", thinks MegaByte is
+# out of date (server: 1.0.1.0), downloads the update and runs the libusbK
+# *driver* installer — which cannot work under Wine and crashes the game right
+# after the download finishes. We don't need that driver (the bridge replaces
+# it), so we mark MegaByte as already up to date, exactly as a successful update
+# would. Matches the version of the bundled MegaByte.exe.
+say "Marking MegaByte up to date (prevents the driver-installer update crash)"
+MB_VER="$(strings "$FUNKEY_HOME/MegaByte/MegaByte.exe" 2>/dev/null | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | tail -1)"
+MB_VER="${MB_VER:-1.0.1.0}"
+wine reg add 'HKCU\Software\OpenFK\FunkeyOne' /v MegaByteVersion /t REG_SZ /d "$MB_VER" /f >/dev/null 2>&1 || true
+
 # ---- 7. udev rule ------------------------------------------------------------
 say "Installing the USB portal udev rule (needs sudo)"
 if [ ! -f /etc/udev/rules.d/70-funkeys-hub.rules ]; then

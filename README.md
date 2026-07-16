@@ -96,6 +96,16 @@ Place a Funkey on the hub — it should appear in the game.
   the game dir, or the override isn't set. Re-run `setup.sh`.
 - **Different install path** — if the game lives somewhere unusual, point the
   launcher at it: `FUNKEY_HOME="/path/to/U.B. Funkeys" ./funkeyone.sh`.
+- **Crashes right after an in-game update finishes downloading** — the updater
+  wrongly thinks the hub component (MegaByte) is out of date and, on "apply",
+  runs the Windows **libusbK driver installer**, which can't run under Wine.
+  You don't need that driver (the bridge replaces it). `setup.sh` prevents this
+  by marking MegaByte up to date; to fix an existing install manually:
+  ```bash
+  wine reg add 'HKCU\Software\OpenFK\FunkeyOne' /v MegaByteVersion /t REG_SZ /d 1.0.1.0 /f
+  ```
+  (use the version of your `MegaByte/MegaByte.exe`). This makes the update stop
+  re-triggering; it does not skip any real game/content updates.
 
 ## How it works / hacking
 
