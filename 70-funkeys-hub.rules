@@ -1,0 +1,20 @@
+# U.B. Funkeys portal / "funkey reader"  (Radica Games, VID 0e4c PID 7288)
+#
+# The device is a vendor-specific-class USB device with no kernel driver, so it
+# needs NO custom driver. It only needs your desktop user to be allowed to open
+# the raw USB node read/write, which is what Chromium's WebUSB (the web player)
+# and libusb/pyusb require. This rule grants that.
+#
+# TAG+="uaccess" gives the currently logged-in seat user access via systemd-logind
+# ACLs (this system already uses ACLs). MODE 0660 is a fallback.
+#
+# NOTE: the filename MUST sort before 73-seat-late.rules (which is what
+# actually applies the uaccess ACL) — hence 70-, not 99-.
+#
+# Install:
+#   sudo cp 70-funkeys-hub.rules /etc/udev/rules.d/
+#   sudo rm -f /etc/udev/rules.d/99-ubfunkeys.rules
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger --attr-match=idVendor=0e4c
+#
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0e4c", ATTRS{idProduct}=="7288", MODE="0660", TAG+="uaccess"

@@ -1,0 +1,25 @@
+LIBRARY ninput.dll
+EXPORTS
+    CreateInteractionContext
+    DestroyInteractionContext
+    ResetInteractionContext
+    StopInteractionContext
+    AddPointerInteractionContext
+    RemovePointerInteractionContext
+    ProcessPointerFramesInteractionContext
+    BufferPointerPacketsInteractionContext
+    ProcessBufferedPacketsInteractionContext
+    ProcessInertiaInteractionContext
+    RegisterOutputCallbackInteractionContext
+    SetInteractionConfigurationInteractionContext
+    GetInteractionConfigurationInteractionContext
+    SetPropertyInteractionContext
+    GetPropertyInteractionContext
+    GetStateInteractionContext
+    SetCrossSlideParametersInteractionContext
+    GetCrossSlideParameterInteractionContext
+    SetInertiaParameterInteractionContext
+    GetInertiaParameterInteractionContext
+    SetMouseWheelParameterInteractionContext
+    GetMouseWheelParameterInteractionContext
+    SetPivotInteractionContext

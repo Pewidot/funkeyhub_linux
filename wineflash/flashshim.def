@@ -1,0 +1,4 @@
+LIBRARY flashshim.dll
+EXPORTS
+    DllGetClassObject
+    DllCanUnloadNow

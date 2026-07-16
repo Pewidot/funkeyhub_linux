@@ -1,0 +1,44 @@
+# ============================================================================
+# Copyrighted game content — MUST NOT be redistributed. Users supply their own.
+# ============================================================================
+# The U.B. Funkeys / FunkeyOne installer and any extracted game data
+UBFunkeys-Setup-x64.exe
+*Setup*.exe
+# The ripped web player (Adobe SWF content, Ruffle, Comic Sans fonts, art)
+play/
+# Adobe Flash Player control and any Flash content (Adobe copyright)
+*.ocx
+*.swf
+*.tlb
+# Game data / save / log files that may embed game content
+*.rdf
+MegaByte_log.txt
+
+# ============================================================================
+# Build artifacts — rebuilt from source by setup.sh / the build.sh scripts.
+# (NOTE: .gitignore has no inline comments — keep patterns on their own lines.)
+# ============================================================================
+# our compiled shims: flashshim.dll, ninput.dll
+*.dll
+# winelib bridge: libusb-1.0.dll.so
+*.dll.so
+# winelib test helpers: decoy.exe.so etc.
+*.exe.so
+# any Windows exe (installer covered above; also decoy.exe build helper)
+*.exe
+*.o
+*.a
+*.obj
+# winebridge / wineflash scratch outputs
+winebridge/portalcheck
+winebridge/decoy
+wineflash/original_inprocserver32.txt
+
+# ============================================================================
+# Scratch / editor / OS
+# ============================================================================
+*.log
+*.swp
+*~
+.DS_Store
+/scratch/
