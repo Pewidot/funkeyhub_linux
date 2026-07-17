@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# First-run bootstrap: install Wine + deps, set up the prefix (.NET), install
+# the game, apply the fixes. Shows a GUI progress bar (zenity + pkexec) when
+# possible; falls back to a terminal. Re-runnable ("repair").
+set -uo pipefail
+PKG=/usr/lib/funkeyone
+USERLIB="$HOME/.local/share/funkeyone"
+STAMP="$USERLIB/.setup-done"
+LOG="$USERLIB/setup.log"
+SELF="$(command -v funkeyone-setup 2>/dev/null || echo /usr/bin/funkeyone-setup)"
+URL="https://www.funkeyone.com/downloads/UBFunkeys-Setup-x64.exe"
+export WINEPREFIX="${WINEPREFIX:-$HOME/.wine}"
+mkdir -p "$USERLIB"; : > "$LOG"
+LAUNCH_AFTER=0; [ "${1:-}" = "--then-launch" ] && LAUNCH_AFTER=1
+
+find_home(){ local c; for c in "$(xdg-user-dir DOCUMENTS 2>/dev/null)/U.B. Funkeys" \
+    "$HOME/Documents/U.B. Funkeys" "$HOME/Dokumente/U.B. Funkeys"; do
+    [ -d "$c/RadicaGame" ] && { echo "$c"; return; }; done; }
+
+# ---- work steps (each returns non-zero on failure; detailed output -> LOG) --
+step_deps(){ "$SUDO" "$PKG/install-deps.sh" && command -v wine >/dev/null && command -v winegcc >/dev/null; }
+step_bridge(){
+  mkdir -p "$USERLIB/winebridge"
+  gcc -fPIC -O2 -c "$PKG/winebridge/bridge_unix.c" -I/usr/include/libusb-1.0 \
+      -o "$USERLIB/winebridge/bridge_unix.o" &&
+  winegcc -shared "$PKG/winebridge/bridge.c" "$USERLIB/winebridge/bridge_unix.o" \
+      "$PKG/winebridge/libusb-1.0.spec" -o "$USERLIB/winebridge/libusb-1.0.dll.so" -lusb-1.0
+}
+step_dotnet(){
+  wine reg query "HKLM\\Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full" /v Version 2>/dev/null \
+    | grep -q "4\." || winetricks -q dotnet48
+}
+step_game(){
+  [ -n "$(find_home)" ] && return 0
+  local inst; inst="$(ls "$HOME"/Downloads/UBFunkeys-Setup-x64.exe "$HOME"/UBFunkeys-Setup-x64.exe 2>/dev/null | head -1 || true)"
+  if [ -z "$inst" ]; then inst="$HOME/Downloads/UBFunkeys-Setup-x64.exe"; mkdir -p "$HOME/Downloads"
+    wget -c -O "$inst" "$URL" || return 1; fi
+  # the game's installer is a manual wizard — tell the user how to set it up so
+  # it doesn't create broken shortcuts, install the Windows hub driver, or launch
+  # the game itself (which would bypass our bridge/MegaByte).
+  local warn="Do NOT click “Launch FunkeyOne” at the end — just CLOSE the installer window."
+  local body="In the installer wizard:
+
+  •  UNCHECK the Start Menu shortcut
+  •  UNCHECK the Desktop shortcut
+  •  Do NOT install the hub / portal driver (we replace it)
+  •  Click “No” if it offers to download .NET / Visual C++
+
+Then click Next → Install, and when it finishes just close the window."
+  if command -v zenity >/dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    zenity --info --width=640 --title="Game installer — please read" \
+      --text="<span size='xx-large' weight='bold' foreground='#c0392b'>${warn}</span>
+
+${body}" 2>/dev/null || true
+  else
+    printf '\n*** %s ***\n\n%s\n\n' "$warn" "$body"
+  fi
+  wine "$inst" || true          # the game's own installer wizard (interactive)
+  [ -n "$(find_home)" ]
+}
+step_fixes(){
+  local h g mbv; h="$(find_home)"; g="$h/RadicaGame"; cd "$g" || return 1
+  [ -f FlashReal.ocx ] || { cp -n Flash.ocx Flash.ocx.orig-backup; mv Flash.ocx FlashReal.ocx; }
+  cp "$PKG/wineflash/flashshim.dll" Flash.ocx
+  wine reg add 'HKCR\CLSID\{D27CDB6E-AE6D-11cf-96B8-444553540000}\InprocServer32' \
+    /ve /d "$(wine winepath -w "$g/FlashReal.ocx" 2>/dev/null | tr -d '\r')" /f >/dev/null 2>&1 || true
+  cp "$PKG/wineninput/ninput.dll" "$g/ninput.dll"
+  mbv="$(strings "$h/MegaByte/MegaByte.exe" 2>/dev/null | grep -oE '^[0-9]+(\.[0-9]+){3}$' | tail -1)"
+  wine reg add 'HKCU\Software\OpenFK\FunkeyOne' /v MegaByteVersion /t REG_SZ /d "${mbv:-1.0.1.0}" /f >/dev/null 2>&1 || true
+  # drop Wine's auto-generated FunkeyOne shortcuts (they bypass our launcher)
+  find "$HOME/.local/share/applications/wine" -iname '*funkey*' -delete 2>/dev/null || true
+  find "$HOME/.config/menus" -iname '*funkey*' -delete 2>/dev/null || true
+  for dd in "$HOME/Desktop" "$HOME/Schreibtisch" "$(xdg-user-dir DESKTOP 2>/dev/null)"; do
+    [ -d "$dd" ] && find "$dd" -maxdepth 1 -iname '*funkey*' -delete 2>/dev/null || true; done
+  # give our menu entries the FunkeyOne icon — fetch the site's favicon and
+  # override the system .desktop files with a user copy pointing at it
+  local ico="$USERLIB/funkeyone.ico"
+  if { wget -q -O "$ico" "https://www.funkeyone.com/favicon.ico" 2>/dev/null \
+       || curl -fsSL -o "$ico" "https://www.funkeyone.com/favicon.ico" 2>/dev/null; } && [ -s "$ico" ]; then
+    mkdir -p "$HOME/.local/share/applications"
+    for d in funkeyone funkeyone-setup; do
+      [ -f "/usr/share/applications/$d.desktop" ] && \
+        sed "s|^Icon=.*|Icon=$ico|" "/usr/share/applications/$d.desktop" > "$HOME/.local/share/applications/$d.desktop"
+    done
+  fi
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+  return 0
+}
+finish(){ : > "$STAMP"; }
+launch(){ export FUNKEY_BRIDGE_DIR="$USERLIB/winebridge"; exec /usr/lib/funkeyone/funkeyone.sh; }
+
+# ---- GUI mode: zenity progress bar + one pkexec password prompt -------------
+if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v zenity >/dev/null 2>&1 && command -v pkexec >/dev/null 2>&1; then
+  SUDO=pkexec
+  if [ -z "$(find_home)" ]; then
+    zenity --question --width=500 --title="U.B. Funkeys — first run" \
+      --text="This installs Wine and .NET, and downloads the game (~900 MB) from funkeyone.com.\n\nYou'll be asked for your password once, and the game's own installer window will appear — just click through it (Next → Install → Done).\n\nContinue?" || exit 1
+  fi
+  (
+    echo "# Installing Wine and dependencies…";                       step_deps   >>"$LOG" 2>&1 || exit 11
+    echo "# Building the USB portal bridge…";                         step_bridge >>"$LOG" 2>&1 || exit 12
+    echo "# Installing .NET 4.8 (this takes several minutes)…";       step_dotnet >>"$LOG" 2>&1 || exit 13
+    echo "# Installing the game — click through the installer window…"; step_game >>"$LOG" 2>&1 || exit 14
+    echo "# Applying the fixes…";                                     step_fixes  >>"$LOG" 2>&1 || exit 15
+    echo "# Done!"
+  ) | zenity --progress --pulsate --auto-close --no-cancel --width=500 \
+             --title="Setting up U.B. Funkeys" --text="Starting…"
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" != 0 ]; then
+    zenity --error --width=500 --title="U.B. Funkeys setup failed" \
+      --text="Setup didn't complete (step code $rc).\n\nDetails are in:\n$LOG"
+    exit 1
+  fi
+  finish
+  [ "$LAUNCH_AFTER" = 1 ] && launch
+  zenity --info --width=360 --title="U.B. Funkeys" --text="Setup complete — have fun!" 2>/dev/null || true
+  exit 0
+fi
+
+# ---- terminal fallback (no display / no zenity / no pkexec) -----------------
+if [ ! -t 1 ]; then
+  INNER="exec \"$SELF\" ${1:-}"
+  for t in x-terminal-emulator gnome-terminal konsole xfce4-terminal mate-terminal \
+           tilix kitty alacritty foot xterm; do
+    command -v "$t" >/dev/null 2>&1 || continue
+    case "$t" in
+      gnome-terminal|tilix) exec "$t" -- bash -lc "$INNER" ;;
+      xfce4-terminal)       exec "$t" -x bash -lc "$INNER" ;;
+      kitty|foot)           exec "$t" bash -lc "$INNER" ;;
+      *)                    exec "$t" -e bash -lc "$INNER" ;;
+    esac
+  done
+fi
+SUDO=sudo
+say(){ printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
+die(){ printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; read -rp "Press Enter to close…" _ 2>/dev/null || true; exit 1; }
+say "Installing Wine and dependencies (password needed)"; step_deps   || die "Wine install failed (see $LOG)"
+say "Building the USB portal bridge";                     step_bridge || die "bridge build failed (see $LOG)"
+say "Installing .NET 4.8 (slow)";                         step_dotnet || die ".NET install failed (see $LOG)"
+say "Installing the game — click through the installer";  step_game   || die "game install failed (see $LOG)"
+say "Applying the fixes";                                 step_fixes  || die "fixes failed (see $LOG)"
+finish
+say "✅ Done!"
+[ "$LAUNCH_AFTER" = 1 ] && launch
+read -rp "Setup complete. Press Enter to close…" _ 2>/dev/null || true

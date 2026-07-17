@@ -42,7 +42,17 @@ GAME_DIR="$FUNKEY_HOME/RadicaGame"
 MB_DIR="$FUNKEY_HOME/MegaByte"
 
 # ---- Wine environment --------------------------------------------------------
-export WINEDLLPATH="$HERE/winebridge${WINEDLLPATH:+:$WINEDLLPATH}"
+# Locate the USB bridge (the built libusb-1.0.dll.so): explicit override first,
+# then beside this script, then the per-user build dir the .deb uses. Pick
+# whichever actually contains the .so, so it works however we're launched.
+BRIDGE_DIR="${FUNKEY_BRIDGE_DIR:-}"
+if [ -z "$BRIDGE_DIR" ] || [ ! -f "$BRIDGE_DIR/libusb-1.0.dll.so" ]; then
+  for cand in "$HERE/winebridge" "$HOME/.local/share/funkeyone/winebridge"; do
+    [ -f "$cand/libusb-1.0.dll.so" ] && { BRIDGE_DIR="$cand"; break; }
+  done
+fi
+BRIDGE_DIR="${BRIDGE_DIR:-$HERE/winebridge}"
+export WINEDLLPATH="$BRIDGE_DIR${WINEDLLPATH:+:$WINEDLLPATH}"
 export WINEDLLOVERRIDES="libusb-1.0=b;ninput=n,b${WINEDLLOVERRIDES:+;$WINEDLLOVERRIDES}"
 
 # ---- portal reader alongside the game ---------------------------------------

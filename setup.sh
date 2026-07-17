@@ -39,7 +39,7 @@ else PM=unknown; fi
 # and (dnf/zypper) the wine dev tools that provide winegcc.
 case "$PM" in
   pacman) PKGS=(wine winetricks libusb gcc mingw-w64-gcc); PM_INSTALL=(sudo pacman -S --needed) ;;
-  apt)    PKGS=(wine winetricks libusb-1.0-0-dev gcc gcc-mingw-w64-x86-64); PM_INSTALL=(sudo apt-get install -y) ;;
+  apt)    PKGS=(wine wine64-tools winetricks libusb-1.0-0-dev gcc gcc-mingw-w64-x86-64); PM_INSTALL=(sudo apt-get install -y) ;;
   dnf)    PKGS=(wine wine-devel winetricks libusb1-devel gcc mingw64-gcc); PM_INSTALL=(sudo dnf install -y) ;;
   zypper) PKGS=(wine wine-devel winetricks libusb-1_0-devel gcc cross-x86_64-w64-mingw32-gcc); PM_INSTALL=(sudo zypper install -y) ;;
   *)      PKGS=() ;;

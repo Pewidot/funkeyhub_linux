@@ -51,11 +51,35 @@ System packages (the setup offers to install these for you):
 
 ## Install
 
+### Ubuntu / Debian — the `.deb` (easiest)
+
+**Download the latest `funkeyone-wine_*.deb` from the
+[Releases page](../../releases)** (or build it yourself with
+`./packaging/build-deb.sh`), then:
+
+1. Install it — `sudo apt install ./funkeyone-wine_1.0.0_amd64.deb`.
+   (Double-clicking a `.deb` opens Archive Manager on modern Ubuntu, so the
+   terminal command — or `gdebi` — is the reliable way.) It installs light and
+   always succeeds — no repo/i386 fiddling.
+2. **Click "U.B. Funkeys"** in your menu. The *first* launch shows a **progress
+   bar** and does everything automatically: installs Wine + all dependencies
+   (one graphical password prompt), fetches the app icon, downloads the game
+   from funkeyone.com, sets up the Wine prefix (.NET), installs the game, and
+   applies the fixes — then plays.
+   - During install the game's own wizard appears; a dialog tells you to
+     **uncheck the Start-Menu/Desktop shortcuts, skip the hub driver, and NOT
+     click "Launch FunkeyOne"** — just close it when it finishes.
+
+Why two steps and not one: a `.deb`'s own install runs as root with no user
+session and can't build a per-user Wine prefix or run apt — so the heavy setup
+happens on first launch instead. After that first run, the game just launches.
+
+### Any distro — the scripts
+
 ```bash
 git clone <this-repo> funkeyone-linux
 cd funkeyone-linux
-# put UBFunkeys-Setup-x64.exe here if the game isn't installed yet
-./setup.sh
+./setup.sh            # auto-detects pacman/apt/dnf/zypper
 ```
 
 `setup.sh` is idempotent and does the whole thing:

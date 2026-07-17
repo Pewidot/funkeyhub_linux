@@ -1,0 +1,8 @@
+#!/bin/sh
+# Game launcher. First launch on this account runs the full setup, then plays.
+USERLIB="$HOME/.local/share/funkeyone"
+export FUNKEY_BRIDGE_DIR="$USERLIB/winebridge"
+if [ ! -f "$USERLIB/.setup-done" ]; then
+  exec funkeyone-setup --then-launch
+fi
+exec /usr/lib/funkeyone/funkeyone.sh "$@"

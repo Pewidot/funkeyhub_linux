@@ -13,6 +13,8 @@ play/
 # Game data / save / log files that may embed game content
 *.rdf
 MegaByte_log.txt
+# App icon — fetched from funkeyone.com's favicon at install time, not shipped
+*.ico
 
 # ============================================================================
 # Build artifacts — rebuilt from source by setup.sh / the build.sh scripts.
@@ -42,3 +44,15 @@ wineflash/original_inprocserver32.txt
 *~
 .DS_Store
 /scratch/
+
+# large / build outputs (never commit)
+*.iso
+*.deb
+
+# VM / test artifacts
+*.qcow2
+*.img
+*.vmdk
+funkeyone-vm/
+# game-install backups the setup makes in place
+*.orig-backup

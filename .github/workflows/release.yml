@@ -1,0 +1,49 @@
+name: Build & release .deb
+
+# Push a tag like v1.0.0 to build the .deb and attach it to a GitHub Release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:        # also allow a manual run from the Actions tab
+
+permissions:
+  contents: write           # needed to create the release
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools (mingw for the PE shims)
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the .deb
+        run: ./packaging/build-deb.sh "${{ steps.ver.outputs.version || '1.0.0' }}"
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: funkeyone-wine-deb
+          path: funkeyone-wine_*.deb
+
+      - name: Attach to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: funkeyone-wine_*.deb
+          body: |
+            **U.B. Funkeys (FunkeyOne) — Ubuntu/Debian package.**
+
+            Install:
+            ```
+            sudo apt install ./funkeyone-wine_*.deb
+            ```
+            Then launch **U.B. Funkeys** from your menu — the first run installs
+            Wine, downloads the game and sets everything up (see the README).
+
+            _You supply the game; no game assets are included._
