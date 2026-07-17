@@ -1,169 +1,169 @@
-# U.B. Funkeys (FunkeyOne) on Linux — Wine support kit
+# U.B. Funkeys (FunkeyOne) on Linux
 
-Run the **FunkeyOne** U.B. Funkeys revival, *with a real physical USB portal*,
-on Linux under Wine. This repo is the glue that makes the Windows game and
-its hub work on Linux — it does **not** contain the game itself.
+This is the Linux-side plumbing I use to run the FunkeyOne U.B. Funkeys revival
+under Wine, including the physical USB portal. The game itself isn't in here;
+you install that separately (it comes from funkeyone.com).
 
-The game embeds Adobe Flash via .NET WinForms and talks to the Radica USB
-portal through a Windows kernel driver. None of that works out-of-the-box under
-Wine. This kit provides three small shims plus a launcher that fix it:
+A few things about the game don't survive Wine on their own. It's a .NET
+WinForms app that embeds Adobe Flash, and the portal reader talks to the hub
+through a Windows kernel driver. Out of that you get: the Flash control crashing
+on startup, the portal driver failing to load, and one of Wine's input stubs
+killing the process. So there are three small shims and a launcher that deal
+with each of those.
 
-| Piece | Problem it solves |
-|-------|-------------------|
-| **winebridge/** — `libusb-1.0.dll` bridge | The portal reader needs the Windows **libusbK kernel driver**, which can't run under Wine. This forwards its libusb calls to Linux's own libusb, so the hub works with no kernel driver. |
-| **wineflash/** — Flash de-licensing shim | .NET's `AxHost` creates the Flash control through a **licensed** COM path that corrupts memory under Wine and crashes the game on startup. The shim hides the licensing interface so the working path is used instead. |
-| **wineninput/** — `ninput.dll` no-op stub | Wine's builtin `ninput` has a stub (`StopInteractionContext`) that **aborts the process**. Flash 34 calls it right after init. This replaces those with harmless no-ops. |
-| **funkeyone.sh** — launcher | Wires the above in and runs the portal reader (`MegaByte.exe`) alongside the game — the game doesn't start it itself. |
+* `winebridge/` is a stand-in `libusb-1.0.dll` that forwards to the host's
+  libusb. That way the portal reader works without the Windows libusbK driver.
+* `wineflash/` is a shim that sits in front of the real `Flash.ocx` and stops
+  .NET's `AxHost` from taking the licensed COM path, which is what corrupts
+  memory and crashes the game under Wine.
+* `wineninput/` is a replacement `ninput.dll`. Wine's own one has an entry point
+  (`StopInteractionContext`) that aborts the process when Flash calls it; ours
+  just returns and does nothing.
+* `funkeyone.sh` is the launcher. It starts the portal reader (`MegaByte.exe`)
+  next to the game, because the game doesn't start it by itself.
 
-> ⚠️ **You must supply the game.** For copyright reasons this repo ships only
-> our own code. Get the installer (`UBFunkeys-Setup-x64.exe`) from the FunkeyOne
-> project itself (<https://www.funkeyone.com>) and place it next to `setup.sh`,
-> or install the game first, before running setup.
+You bring the game. Nothing in here contains the installer, the SWFs, Flash, or
+any Funkeys assets. The setup downloads `UBFunkeys-Setup-x64.exe` from
+funkeyone.com for you (with a confirmation first).
 
----
+## Getting it running
 
-## Requirements
+### Ubuntu / Debian
 
-- **Any mainstream Linux distro.** `setup.sh` auto-detects `pacman` / `apt` /
-  `dnf` / `zypper` and installs the right packages.
-- A **recent Wine (11.x+, WoW64)** — needed for .NET 4.8 + Flash. Rolling
-  distros (Arch, Fedora, openSUSE Tumbleweed) are fine; **Debian/Ubuntu stable
-  ship an old Wine**, so use the [WineHQ repo](https://wiki.winehq.org/Download)
-  there.
-- A Radica **U.B. Funkeys USB portal** (`0e4c:7288`) for hub features (the game
-  runs fine without one — you just can't scan physical Funkeys).
-- **systemd-logind** for automatic portal access (nearly all desktop distros).
-  On non-systemd systems the setup prints a one-line group-based fallback.
-
-System packages (the setup offers to install these for you):
-
-| Distro | Command |
-|--------|---------|
-| Arch | `sudo pacman -S --needed wine winetricks libusb gcc mingw-w64-gcc` |
-| Debian/Ubuntu | `sudo apt install wine winetricks libusb-1.0-0-dev gcc gcc-mingw-w64-x86-64` |
-| Fedora | `sudo dnf install wine wine-devel winetricks libusb1-devel gcc mingw64-gcc` |
-| openSUSE | `sudo zypper install wine wine-devel winetricks libusb-1_0-devel gcc cross-x86_64-w64-mingw32-gcc` |
-
-- `wine` (+ `winegcc` from it / `wine-devel`) — run the game, build the USB bridge
-- `winetricks` — installs .NET into the prefix
-- `libusb` (+ dev headers) — the USB bridge forwards to it
-- `gcc` + `mingw-w64` — build the shims locally (no binaries are shipped)
-
-## Install
-
-### Ubuntu / Debian — the `.deb` (easiest)
-
-**Download the latest `funkeyone-wine_*.deb` from the
-[Releases page](../../releases)** (or build it yourself with
-`./packaging/build-deb.sh`), then:
-
-1. Install it — `sudo apt install ./funkeyone-wine_1.0.0_amd64.deb`.
-   (Double-clicking a `.deb` opens Archive Manager on modern Ubuntu, so the
-   terminal command — or `gdebi` — is the reliable way.) It installs light and
-   always succeeds — no repo/i386 fiddling.
-2. **Click "U.B. Funkeys"** in your menu. The *first* launch shows a **progress
-   bar** and does everything automatically: installs Wine + all dependencies
-   (one graphical password prompt), fetches the app icon, downloads the game
-   from funkeyone.com, sets up the Wine prefix (.NET), installs the game, and
-   applies the fixes — then plays.
-   - During install the game's own wizard appears; a dialog tells you to
-     **uncheck the Start-Menu/Desktop shortcuts, skip the hub driver, and NOT
-     click "Launch FunkeyOne"** — just close it when it finishes.
-
-Why two steps and not one: a `.deb`'s own install runs as root with no user
-session and can't build a per-user Wine prefix or run apt — so the heavy setup
-happens on first launch instead. After that first run, the game just launches.
-
-### Any distro — the scripts
+Grab the `.deb` from the [Releases page](../../releases), or build it yourself
+with `./packaging/build-deb.sh`, and install it:
 
 ```bash
-git clone <this-repo> funkeyone-linux
+sudo apt install ./funkeyone-wine_1.0.0_amd64.deb
+```
+
+Double-clicking a `.deb` on recent Ubuntu just opens Archive Manager, so use the
+terminal (or install `gdebi`).
+
+The package is tiny and barely depends on anything, so the install itself always
+goes through. The real work happens the first time you open "U.B. Funkeys" from
+the menu. A progress window walks through installing Wine, setting up the prefix
+with .NET, downloading the game, and applying the fixes. You'll get one password
+prompt for the Wine install, and the app icon is pulled from the site's favicon.
+
+Partway through, the game's own installer opens. When it does:
+
+* untick the Start Menu and Desktop shortcut options,
+* don't install the hub/portal driver,
+* click "No" if it offers to download .NET or Visual C++,
+* and don't tick "Launch FunkeyOne" at the end. Just close the window.
+
+There's a dialog that reminds you of all this right before the installer shows
+up.
+
+It's two steps (install the package, then launch once) because a `.deb` install
+runs as root with no desktop session, so it can't build your Wine prefix or run
+the game's installer. That part has to run as you, on first launch. After that
+the menu entry just starts the game.
+
+### Other distros
+
+```bash
+git clone https://github.com/Pewidot/funkeyhub_linux_mac funkeyone-linux
 cd funkeyone-linux
-./setup.sh            # auto-detects pacman/apt/dnf/zypper
+./setup.sh
 ```
 
-`setup.sh` is idempotent and does the whole thing:
+`setup.sh` figures out your package manager (pacman, apt, dnf or zypper),
+installs what's missing, puts .NET 4.8 in the Wine prefix, installs the game,
+builds the three shims, swaps in the Flash shim, adds the udev rule, and creates
+a menu entry. It's safe to re-run.
 
-1. checks the system packages above
-2. installs **real .NET 4.8** into the Wine prefix (`winetricks dotnet48`) — the
-   game needs Microsoft .NET, not wine-mono; this step is slow the first time
-3. installs the game if it isn't already (runs the Windows installer)
-4. builds the three shims from source
-5. swaps the Flash shim into the game (`Flash.ocx` → shim, real control kept as
-   `FlashReal.ocx`)
-6. drops `ninput.dll` into the game directory
-7. installs the udev rule so your user can open the portal (needs `sudo`)
-8. adds a **"U.B. Funkeys" entry to your application menu** (icon taken from the
-   game). Run `./install-menu.sh` on its own to (re)create it, or
-   `./install-menu.sh --remove` to remove it.
+When it finishes, unplug and replug the portal once, then start the game from
+the menu or with `./funkeyone.sh`. Put a Funkey on the hub and it should show up
+in the game.
 
-After it finishes, **unplug and replug the portal once**, then launch
-**U.B. Funkeys** from your application menu, or run:
+One thing to watch: you need a reasonably recent Wine (11.x, WoW64) for .NET 4.8
+and Flash. Arch, Fedora and openSUSE Tumbleweed are fine as they are.
+Debian/Ubuntu stable ship an older Wine, so install it from the
+[WineHQ repo](https://wiki.winehq.org/Download) there.
+
+The packages you need per distro:
+
+| Distro | Packages |
+|--------|----------|
+| Arch | `wine winetricks libusb gcc mingw-w64-gcc` |
+| Debian/Ubuntu | `wine wine64-tools winetricks libusb-1.0-0-dev gcc gcc-mingw-w64-x86-64` |
+| Fedora | `wine wine-devel winetricks libusb1-devel gcc mingw64-gcc` |
+| openSUSE | `wine wine-devel winetricks libusb-1_0-devel gcc cross-x86_64-w64-mingw32-gcc` |
+
+`winegcc` builds the USB bridge (it's in `wine64-tools` on Ubuntu, in `wine`
+elsewhere). mingw builds the two PE shims. Nothing is shipped as a binary; it's
+all compiled on your machine so it matches your Wine and libusb.
+
+## If the hub isn't detected
+
+Launch through `./funkeyone.sh` (or the menu entry), not the game `.exe`
+directly. Only the launcher starts the portal reader with the bridge active;
+run the exe on its own and nothing reads the hub. To see what the bridge is
+doing:
 
 ```bash
-./funkeyone.sh
+FUNKEY_BRIDGE_DEBUG=1 ./funkeyone.sh
 ```
 
-Place a Funkey on the hub — it should appear in the game.
+Then check `~/…/U.B. Funkeys/MegaByte/MegaByte_log.txt`. "MegaByte portal
+attached" means it's working. "Device not found … libusbK/WinUSB" usually means
+the bridge override didn't apply (you started the exe directly). A permission
+error means the udev rule isn't active yet, so replug the portal.
 
-## Troubleshooting
+If you get a permission error on the device, the udev rule has to sort before
+`73-seat-late.rules`, which is why it's named `70-…`. Reload and retrigger it:
 
-- **Hub not detected** — make sure you launch via `./funkeyone.sh` (not the game
-  `.exe` directly). It starts the portal reader with the bridge; running the exe
-  alone leaves the hub unread. Debug the USB path with:
-  ```bash
-  FUNKEY_BRIDGE_DEBUG=1 ./funkeyone.sh
-  ```
-  and check `~/…/U.B. Funkeys/MegaByte/MegaByte_log.txt` — `MegaByte portal
-  attached` means it's working. `Device not found … libusbK/WinUSB` means the
-  bridge override didn't apply (you launched the exe directly), and a permission
-  error means the udev rule isn't active yet (replug the portal).
-- **Portal permission denied** — the udev rule file must sort *before*
-  `73-seat-late.rules`; it's named `70-…` for that reason. Re-run:
-  ```bash
-  sudo udevadm control --reload-rules && sudo udevadm trigger --attr-match=idVendor=0e4c
-  ```
-  then replug. Remove any stale `/etc/udev/rules.d/99-ubfunkeys.rules`.
-- **Game crashes on startup with `AxHost.CreateWithLicense`** — the Flash shim
-  swap didn't take. Confirm the game dir's `Flash.ocx` is ~180 KB (the shim),
-  not ~14 MB (the real control, which should be `FlashReal.ocx`).
-- **Aborts with `ninput.dll.StopInteractionContext`** — `ninput.dll` isn't in
-  the game dir, or the override isn't set. Re-run `setup.sh`.
-- **Different install path** — if the game lives somewhere unusual, point the
-  launcher at it: `FUNKEY_HOME="/path/to/U.B. Funkeys" ./funkeyone.sh`.
-- **Crashes right after an in-game update finishes downloading** — the updater
-  wrongly thinks the hub component (MegaByte) is out of date and, on "apply",
-  runs the Windows **libusbK driver installer**, which can't run under Wine.
-  You don't need that driver (the bridge replaces it). `setup.sh` prevents this
-  by marking MegaByte up to date; to fix an existing install manually:
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger --attr-match=idVendor=0e4c
+```
+
+then replug. Delete any old `/etc/udev/rules.d/99-ubfunkeys.rules` if it's still
+around.
+
+A couple of other failure modes:
+
+* Crash on startup at `AxHost.CreateWithLicense` means the Flash shim swap
+  didn't take. The game dir's `Flash.ocx` should be the ~180 KB shim, with the
+  real ~14 MB control renamed to `FlashReal.ocx`.
+* An abort mentioning `ninput.dll.StopInteractionContext` means `ninput.dll`
+  isn't in the game dir or the override isn't set. Re-run `setup.sh`.
+* If the game is installed somewhere unusual, point the launcher at it with
+  `FUNKEY_HOME="/path/to/U.B. Funkeys" ./funkeyone.sh`.
+* If the game crashes right after an in-game update finishes downloading, the
+  updater thinks MegaByte is out of date and tries to run the Windows libusbK
+  driver installer, which can't work under Wine. You don't need that driver.
+  The setup already writes a version key to stop this; to fix it by hand:
   ```bash
   wine reg add 'HKCU\Software\OpenFK\FunkeyOne' /v MegaByteVersion /t REG_SZ /d 1.0.1.0 /f
   ```
-  (use the version of your `MegaByte/MegaByte.exe`). This makes the update stop
-  re-triggering; it does not skip any real game/content updates.
+  (use the version of your `MegaByte/MegaByte.exe`). It only silences that one
+  bogus update, not real content updates.
 
-## How it works / hacking
+## How it works
 
-Each component is small, commented C with its own `build.sh`:
+Each shim is a small, commented C file with its own `build.sh`:
 
-- [`winebridge/`](winebridge/) — split-ABI winelib bridge (see its
-  [README](winebridge/README.md) for the two Wine gotchas: the ms/SysV ABI split
-  and libusb device-discovery crashing inside Wine). `winebridge/portalcheck`
-  is a native tool to test the portal directly.
-- [`wineflash/flashshim.c`](wineflash/flashshim.c) — a COM class-factory that
-  answers `E_NOINTERFACE` for `IClassFactory2`, so `AxHost` skips licensing, and
-  forwards real object creation to `FlashReal.ocx`. Installed via a reg-free-COM
-  file swap (the game's manifest loads `Flash.ocx` by name).
-- [`wineninput/ninputstub.c`](wineninput/ninputstub.c) — every InteractionContext
-  entry point as a no-op returning `S_OK`.
+* [`winebridge/`](winebridge/) is a winelib module, split across two objects
+  because of an ABI issue (its [README](winebridge/README.md) has the details:
+  the ms/SysV split, and libusb's normal device discovery crashing inside Wine,
+  which is why it opens the device by scanning sysfs instead).
+  `winebridge/portalcheck` is a small native tool to poke the portal directly.
+* [`wineflash/flashshim.c`](wineflash/flashshim.c) is a COM class factory that
+  returns `E_NOINTERFACE` for `IClassFactory2`, so `AxHost` skips the licensed
+  path, then hands real object creation off to `FlashReal.ocx`. It's installed
+  by a plain file swap because the game loads Flash through a reg-free-COM
+  manifest that names `Flash.ocx` directly.
+* [`wineninput/ninputstub.c`](wineninput/ninputstub.c) is every
+  InteractionContext function as a no-op returning `S_OK`.
 
-Rebuild any one with its `./build.sh`. The prebuilt binaries are intentionally
-**not** committed — they're compiled locally so they match your Wine/libusb.
+Rebuild any of them with its `./build.sh`.
 
-## Legal
+## What's in here (and what isn't)
 
-This repository contains only original support code (the shims, launcher, udev
-rule) under no particular game license. It includes **no** Adobe Flash, no
-Radica/U.B. Funkeys assets, and no FunkeyOne binaries — you provide those
-yourself from sources you're entitled to use. U.B. Funkeys is a trademark of its
-respective owners; this project is an unaffiliated compatibility layer.
+Only original support code: the shims, the launcher, the udev rule, the
+packaging and setup scripts. No Adobe Flash, no Radica or U.B. Funkeys assets,
+no FunkeyOne binaries. You supply the game from wherever you're entitled to get
+it. U.B. Funkeys is a trademark of its owners; this is an unaffiliated
+compatibility layer.
