@@ -138,12 +138,11 @@ echo "2.0" > "$STAGE/debian-binary"
 ( cd "$C" && tar --owner=0 --group=0 -czf "$STAGE/control.tar.gz" ./* )
 ( cd "$D" && tar --owner=0 --group=0 -czf "$STAGE/data.tar.gz" ./* )
 rm -f "$OUT"
-if command -v dpkg-deb >/dev/null 2>&1; then
-  dpkg-deb --root-owner-group --build "$D" "$OUT" >/dev/null
-else
-  # Write a canonical ar archive (member names space-padded, NO trailing slash,
-  # which GNU `ar` would add and stricter dpkg tooling rejects).
-  python3 - "$OUT" "$STAGE/debian-binary" "$STAGE/control.tar.gz" "$STAGE/data.tar.gz" <<'PY'
+# Assemble the .deb as a canonical ar archive ourselves — works on any build
+# host (no dpkg-deb needed) and gives identical output. Member names are
+# space-padded with NO trailing slash (GNU `ar` adds a slash that stricter
+# dpkg tooling rejects).
+python3 - "$OUT" "$STAGE/debian-binary" "$STAGE/control.tar.gz" "$STAGE/data.tar.gz" <<'PY'
 import sys
 out, members = sys.argv[1], sys.argv[2:]
 with open(out, 'wb') as f:
@@ -157,7 +156,6 @@ with open(out, 'wb') as f:
         f.write(hdr); f.write(data)
         if len(data) % 2: f.write(b'\n')
 PY
-fi
 msg "Built: $OUT"
 ls -la "$OUT"
 echo
