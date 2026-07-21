@@ -52,10 +52,24 @@ install -m755 "$REPO/packaging/files/funkeyone-setup" "$D/usr/bin/funkeyone-setu
 install -m755 "$REPO/packaging/files/install-deps.sh" "$D/usr/lib/funkeyone/install-deps.sh"
 
 # ---- icon --------------------------------------------------------------------
-# The app icon is fetched from funkeyone.com's favicon by funkeyone-setup at
-# install time and applied per-user on first run — so no game asset lives in
-# this repo. The .desktop entries just reference the name.
-ICON=funkeyone
+# Fetch the FunkeyOne logo at BUILD time and ship it as a named icon, so the
+# menu entry has an icon immediately (no runtime download, no fragile .ico).
+# It is fetched, not committed, so no game asset lives in the repo. Falls back
+# to a stock icon name if offline.
+ICON=applications-games
+install -d "$D/usr/share/pixmaps"
+if curl -fsSL -o "$D/usr/share/pixmaps/funkeyone.png" \
+        "https://www.funkeyone.com/images/funkeyone.png" 2>/dev/null \
+   && [ -s "$D/usr/share/pixmaps/funkeyone.png" ]; then
+  ICON=funkeyone
+  # a properly-sized themed copy too, if ImageMagick is available
+  if command -v magick >/dev/null 2>&1; then
+    install -d "$D/usr/share/icons/hicolor/256x256/apps"
+    magick "$D/usr/share/pixmaps/funkeyone.png" -background none -gravity center \
+      -resize 256x256 -extent 256x256 \
+      "$D/usr/share/icons/hicolor/256x256/apps/funkeyone.png" 2>/dev/null || true
+  fi
+fi
 
 # ---- menu entries (unquoted heredocs so $ICON expands) ----------------------
 cat > "$D/usr/share/applications/funkeyone.desktop" <<EOF

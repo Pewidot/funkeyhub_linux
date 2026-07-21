@@ -72,17 +72,12 @@ step_fixes(){
   find "$HOME/.config/menus" -iname '*funkey*' -delete 2>/dev/null || true
   for dd in "$HOME/Desktop" "$HOME/Schreibtisch" "$(xdg-user-dir DESKTOP 2>/dev/null)"; do
     [ -d "$dd" ] && find "$dd" -maxdepth 1 -iname '*funkey*' -delete 2>/dev/null || true; done
-  # give our menu entries the FunkeyOne icon — fetch the site's favicon and
-  # override the system .desktop files with a user copy pointing at it
-  local ico="$USERLIB/funkeyone.ico"
-  if { wget -q -O "$ico" "https://www.funkeyone.com/favicon.ico" 2>/dev/null \
-       || curl -fsSL -o "$ico" "https://www.funkeyone.com/favicon.ico" 2>/dev/null; } && [ -s "$ico" ]; then
-    mkdir -p "$HOME/.local/share/applications"
-    for d in funkeyone funkeyone-setup; do
-      [ -f "/usr/share/applications/$d.desktop" ] && \
-        sed "s|^Icon=.*|Icon=$ico|" "/usr/share/applications/$d.desktop" > "$HOME/.local/share/applications/$d.desktop"
-    done
-  fi
+  # drop any stale per-user .desktop override from older versions (those pointed
+  # Icon= at a .ico that GNOME renders poorly). The system entries ship a proper
+  # PNG icon now, so let those show through.
+  rm -f "$HOME/.local/share/applications/funkeyone.desktop" \
+        "$HOME/.local/share/applications/funkeyone-setup.desktop" \
+        "$HOME/.local/share/funkeyone/funkeyone.ico" 2>/dev/null || true
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
   return 0
 }
