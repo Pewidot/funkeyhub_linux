@@ -1,6 +1,9 @@
 #!/bin/sh
-# Run as ROOT (via pkexec or sudo): enable the repos Wine needs, add the i386
-# architecture, and install Wine + the build dependencies. One privileged step.
+# Run as ROOT (via pkexec or sudo): enable the repos Wine needs, add i386, and
+# install Wine + the build/runtime dependencies. One privileged step.
+#
+# The USB bridge is now a native daemon (plain gcc + libusb) talking to a PE
+# proxy over a socket — so NO winegcc / wine dev-tools are required anymore.
 set -e
 if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
   sed -i 's/^Components:.*/Components: main restricted universe multiverse/' \
@@ -10,6 +13,6 @@ elif [ -f /etc/apt/sources.list ]; then
 fi
 dpkg --add-architecture i386 || true
 apt-get update -y || true
-# wine64-tools provides winegcc on Ubuntu (the wine package omits the dev tools)
-DEPS="wine64-tools winetricks libusb-1.0-0-dev gcc xdg-user-dirs wget zenity ca-certificates"
+# gcc + libusb-1.0-0-dev build the daemon; python3 + unzip extract the client.
+DEPS="winetricks gcc libusb-1.0-0-dev python3 unzip wget curl zenity xdg-user-dirs ca-certificates"
 apt-get install -y wine $DEPS || apt-get install -y wine64 $DEPS

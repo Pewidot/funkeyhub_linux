@@ -1,63 +1,133 @@
 #!/usr/bin/env bash
-# First-run bootstrap: install Wine + deps, set up the prefix (.NET), install
-# the game, apply the fixes. Shows a GUI progress bar (zenity + pkexec) when
-# possible; falls back to a terminal. Re-runnable ("repair").
+# First-run bootstrap for the U.B. Funkeys (FunkeyOne) .deb.
+#
+# Ships NO game or Adobe binaries. Everything copyrighted is fetched on this
+# machine, from sources the user supplies/triggers:
+#   * game assets  -> the full-game zip (downloaded, ~900 MB)
+#   * the revival client (FunkeyOne.exe, Flash.ocx, Shockwave DLLs) and the
+#     MegaByte reader -> EXTRACTED out of the game's own installer
+#     (UBFunkeys-Setup-x64.exe) with extract-payload.py, no Wine, no clicking.
+# Then it builds the native USB bridge, installs .NET, applies the Wine fixes.
+#
+# Shows a zenity progress bar (pkexec for the one root step) when possible,
+# falls back to a terminal. Re-runnable ("repair"). Headless: --run-all.
 set -uo pipefail
-PKG=/usr/lib/funkeyone
+PKG="${FUNKEY_PKG:-/usr/lib/funkeyone}"
 USERLIB="$HOME/.local/share/funkeyone"
 STAMP="$USERLIB/.setup-done"
 LOG="$USERLIB/setup.log"
 SELF="$(command -v funkeyone-setup 2>/dev/null || echo /usr/bin/funkeyone-setup)"
-URL="https://www.funkeyone.com/downloads/UBFunkeys-Setup-x64.exe"
+INSTALLER_URL="${FUNKEY_INSTALLER_URL:-https://www.funkeyone.com/downloads/UBFunkeys-Setup-x64.exe}"
+MF_PAGE="https://www.mediafire.com/file/s51yymn2ud1wiqf/U.B._Funkeys_5.0_Full_Game.zip/file"
+MF_FALLBACK="https://download1072.mediafire.com/cbxjjubmorhgo_Zate4YWgyyKa-sU_1Shwz78ykOJk5T4b3W2yXtzzdpmwtpv5I8WL4PR7j1FWaosq8pJQTXaR3bWG0VzuWDybh1kp6PBpd6QQnnJ1nALGL5SLf9cLjTBiC6LMWpw6KqAXy0GdOGdLqc_Z5GwuaKohK7QfAH6Q/s51yymn2ud1wiqf/U.B.+Funkeys+5.0+Full+Game.zip"
 export WINEPREFIX="${WINEPREFIX:-$HOME/.wine}"
+command -v wineserver >/dev/null 2>&1 || \
+  export WINESERVER="$(ls /usr/lib/*/wine/wineserver /usr/lib/wine/wineserver 2>/dev/null | head -1)"
 mkdir -p "$USERLIB"; : > "$LOG"
 LAUNCH_AFTER=0; [ "${1:-}" = "--then-launch" ] && LAUNCH_AFTER=1
+PORTAL_MSG=""
+GAME_ZIP=""; INSTALLER=""
 
+GAME_ROOT="$(xdg-user-dir DOCUMENTS 2>/dev/null || echo "$HOME/Documents")/U.B. Funkeys"
 find_home(){ local c; for c in "$(xdg-user-dir DOCUMENTS 2>/dev/null)/U.B. Funkeys" \
     "$HOME/Documents/U.B. Funkeys" "$HOME/Dokumente/U.B. Funkeys"; do
     [ -d "$c/RadicaGame" ] && { echo "$c"; return; }; done; }
 
-# ---- work steps (each returns non-zero on failure; detailed output -> LOG) --
-step_deps(){ "$SUDO" "$PKG/install-deps.sh" && command -v wine >/dev/null && command -v winegcc >/dev/null; }
+step_deps(){ "$SUDO" "$PKG/install-deps.sh" && command -v wine >/dev/null && command -v gcc >/dev/null; }
 step_bridge(){
   mkdir -p "$USERLIB/winebridge"
-  gcc -fPIC -O2 -c "$PKG/winebridge/bridge_unix.c" -I/usr/include/libusb-1.0 \
-      -o "$USERLIB/winebridge/bridge_unix.o" &&
-  winegcc -shared "$PKG/winebridge/bridge.c" "$USERLIB/winebridge/bridge_unix.o" \
-      "$PKG/winebridge/libusb-1.0.spec" -o "$USERLIB/winebridge/libusb-1.0.dll.so" -lusb-1.0
+  # native USB daemon (plain gcc, real libusb — no Wine, no winegcc, no ABI split)
+  gcc -O2 "$PKG/winebridge/funkeyusbd.c" "$PKG/winebridge/bridge_unix.c" \
+      -I/usr/include/libusb-1.0 -o "$USERLIB/winebridge/funkeyusbd" -lusb-1.0
+  # the PE libusb-1.0.dll proxy is prebuilt and shipped; keep it beside the daemon
+  [ -f "$PKG/winebridge/libusb-1.0.dll" ] && cp "$PKG/winebridge/libusb-1.0.dll" "$USERLIB/winebridge/libusb-1.0.dll"
 }
 step_dotnet(){
   wine reg query "HKLM\\Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full" /v Version 2>/dev/null \
     | grep -q "4\." || winetricks -q dotnet48
 }
-step_game(){
-  [ -n "$(find_home)" ] && return 0
-  local inst; inst="$(ls "$HOME"/Downloads/UBFunkeys-Setup-x64.exe "$HOME"/UBFunkeys-Setup-x64.exe 2>/dev/null | head -1 || true)"
-  if [ -z "$inst" ]; then inst="$HOME/Downloads/UBFunkeys-Setup-x64.exe"; mkdir -p "$HOME/Downloads"
-    wget -c -O "$inst" "$URL" || return 1; fi
-  # the game's installer is a manual wizard — tell the user how to set it up so
-  # it doesn't create broken shortcuts, install the Windows hub driver, or launch
-  # the game itself (which would bypass our bridge/MegaByte).
-  local warn="Do NOT click “Launch FunkeyOne” at the end — just CLOSE the installer window."
-  local body="In the installer wizard:
 
-  •  UNCHECK the Start Menu shortcut
-  •  UNCHECK the Desktop shortcut
-  •  Do NOT install the hub / portal driver (we replace it)
-  •  Click “No” if it offers to download .NET / Visual C++
-
-Then click Next → Install, and when it finishes just close the window."
-  if command -v zenity >/dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
-    zenity --info --width=640 --title="Game installer — please read" \
-      --text="<span size='xx-large' weight='bold' foreground='#c0392b'>${warn}</span>
-
-${body}" 2>/dev/null || true
-  else
-    printf '\n*** %s ***\n\n%s\n\n' "$warn" "$body"
-  fi
-  wine "$inst" || true          # the game's own installer wizard (interactive)
-  [ -n "$(find_home)" ]
+resolve_url(){
+  local html link
+  html="$(curl -fsSL -A 'Mozilla/5.0 UBFunkeys-Installer/2.0' --max-time 30 "$MF_PAGE" 2>/dev/null || true)"
+  link="$(printf '%s' "$html" | grep -oiE "https?://download[^\"'[:space:]<>]+" | head -1)"
+  printf '%s' "${link:-$MF_FALLBACK}"
 }
+is_zip(){ [ "$(head -c2 "$1" 2>/dev/null)" = "PK" ]; }
+
+# Locate/download the full-game zip (assets). Sets GAME_ZIP.
+ensure_game_zip(){
+  if [ -n "${FUNKEY_LOCAL_ZIP:-}" ]; then
+    [ -f "$FUNKEY_LOCAL_ZIP" ] || { echo "FUNKEY_LOCAL_ZIP not found: $FUNKEY_LOCAL_ZIP"; return 1; }
+    GAME_ZIP="$FUNKEY_LOCAL_ZIP"; return 0
+  fi
+  local existing
+  existing="$(ls -S "$HOME"/Downloads/*[Ff]ull*[Gg]ame*.zip 2>/dev/null | head -1 || true)"
+  if [ -n "$existing" ] && is_zip "$existing"; then
+    echo "Using the game zip already in Downloads: $existing"; GAME_ZIP="$existing"; return 0
+  fi
+  GAME_ZIP="$HOME/Downloads/UBFunkeys_Full_Game.zip"; mkdir -p "$HOME/Downloads"
+  if [ -f "$GAME_ZIP" ] && is_zip "$GAME_ZIP"; then
+    echo "Using the already-downloaded game zip."; return 0
+  fi
+  echo "Downloading the game (~900 MB)…"
+  wget -c --user-agent='Mozilla/5.0' -O "$GAME_ZIP" "$(resolve_url)" || return 1
+}
+
+# Locate/download the revival installer we extract the client from. Sets INSTALLER.
+ensure_installer(){
+  if [ -n "${FUNKEY_LOCAL_INSTALLER:-}" ]; then
+    [ -f "$FUNKEY_LOCAL_INSTALLER" ] || { echo "FUNKEY_LOCAL_INSTALLER not found: $FUNKEY_LOCAL_INSTALLER"; return 1; }
+    INSTALLER="$FUNKEY_LOCAL_INSTALLER"; return 0
+  fi
+  local c
+  for c in "$HOME/Downloads/UBFunkeys-Setup-x64.exe" "$HOME/UBFunkeys-Setup-x64.exe"; do
+    [ -f "$c" ] && [ "$(head -c2 "$c")" = "MZ" ] && { echo "Using the installer already present: $c"; INSTALLER="$c"; return 0; }
+  done
+  INSTALLER="$HOME/Downloads/UBFunkeys-Setup-x64.exe"; mkdir -p "$HOME/Downloads"
+  echo "Downloading the FunkeyOne installer (~23 MB)…"
+  wget -c -O "$INSTALLER" "$INSTALLER_URL" 2>/dev/null || curl -fL -o "$INSTALLER" "$INSTALLER_URL" || return 1
+  [ -s "$INSTALLER" ] && [ "$(head -c2 "$INSTALLER")" = "MZ" ]
+}
+
+step_game(){
+  local h; h="$(find_home)"
+  if [ -z "$h" ]; then
+    # 1) game assets from the full-game zip
+    ensure_game_zip || return 1
+    is_zip "$GAME_ZIP" || { echo "game download is not a ZIP (link may have expired)"; return 1; }
+    local stg rg root; stg="$(mktemp -d)"
+    echo "Extracting game assets…"
+    unzip -q -o "$GAME_ZIP" -d "$stg" || { rm -rf "$stg"; return 1; }
+    rg="$(find "$stg" -maxdepth 4 -type d -iname RadicaGame | head -1)"
+    [ -n "$rg" ] || { echo "RadicaGame not found in the game zip"; rm -rf "$stg"; return 1; }
+    root="$(dirname "$rg")"
+    mkdir -p "$GAME_ROOT"
+    cp -a "$root"/. "$GAME_ROOT"/
+    rm -rf "$stg"
+    h="$GAME_ROOT"
+  fi
+  [ -d "$h/RadicaGame" ] || return 1
+  # 2) overlay the revival client + MegaByte.exe, extracted from the installer
+  ensure_installer || return 1
+  rm -rf "$h/MegaByte"          # drop the stale 2020 MegaByte + driver junk
+  echo "Extracting the FunkeyOne client from the installer…"
+  python3 "$PKG/extract-payload.py" "$INSTALLER" "$h/RadicaGame" "$h/MegaByte" || return 1
+  # stop the in-game self-patcher from re-downloading/replacing our client
+  for v in GamePatchVersion PendingUpdateXml TrunkVersion; do
+    wine reg delete 'HKCU\Software\OpenFK\FunkeyOne' /v "$v" /f >/dev/null 2>&1 || true
+  done
+  [ -f "$h/RadicaGame/FunkeyOne.exe" ] && [ -f "$h/MegaByte/MegaByte.exe" ]
+}
+
+step_mega(){
+  local h; h="$(find_home)"; [ -n "$h" ] || return 1
+  mkdir -p "$h/MegaByte"
+  # MegaByte.exe was extracted in step_game; install our PE libusb proxy beside it
+  [ -f "$PKG/winebridge/libusb-1.0.dll" ] && cp "$PKG/winebridge/libusb-1.0.dll" "$h/MegaByte/libusb-1.0.dll"
+  [ -f "$h/MegaByte/MegaByte.exe" ]
+}
+
 step_fixes(){
   local h g mbv; h="$(find_home)"; g="$h/RadicaGame"; cd "$g" || return 1
   [ -f FlashReal.ocx ] || { cp -n Flash.ocx Flash.ocx.orig-backup; mv Flash.ocx FlashReal.ocx; }
@@ -67,38 +137,84 @@ step_fixes(){
   cp "$PKG/wineninput/ninput.dll" "$g/ninput.dll"
   mbv="$(strings "$h/MegaByte/MegaByte.exe" 2>/dev/null | grep -oE '^[0-9]+(\.[0-9]+){3}$' | tail -1)"
   wine reg add 'HKCU\Software\OpenFK\FunkeyOne' /v MegaByteVersion /t REG_SZ /d "${mbv:-1.0.1.0}" /f >/dev/null 2>&1 || true
-  # drop Wine's auto-generated FunkeyOne shortcuts (they bypass our launcher)
   find "$HOME/.local/share/applications/wine" -iname '*funkey*' -delete 2>/dev/null || true
   find "$HOME/.config/menus" -iname '*funkey*' -delete 2>/dev/null || true
   for dd in "$HOME/Desktop" "$HOME/Schreibtisch" "$(xdg-user-dir DESKTOP 2>/dev/null)"; do
     [ -d "$dd" ] && find "$dd" -maxdepth 1 -iname '*funkey*' -delete 2>/dev/null || true; done
-  # drop any stale per-user .desktop override from older versions (those pointed
-  # Icon= at a .ico that GNOME renders poorly). The system entries ship a proper
-  # PNG icon now, so let those show through.
   rm -f "$HOME/.local/share/applications/funkeyone.desktop" \
         "$HOME/.local/share/applications/funkeyone-setup.desktop" \
         "$HOME/.local/share/funkeyone/funkeyone.ico" 2>/dev/null || true
+  local desk; desk="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"
+  if [ -d "$desk" ] && [ -f /usr/share/applications/funkeyone.desktop ]; then
+    cp /usr/share/applications/funkeyone.desktop "$desk/U.B. Funkeys.desktop"
+    chmod +x "$desk/U.B. Funkeys.desktop"
+    gio set "$desk/U.B. Funkeys.desktop" metadata::trusted true 2>/dev/null \
+      || gio set "$desk/U.B. Funkeys.desktop" metadata::trusted yes 2>/dev/null || true
+  fi
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
   return 0
 }
+
+step_portal(){
+  local pc="$USERLIB/portalcheck" out=""
+  if [ ! -x "$pc" ] && command -v gcc >/dev/null 2>&1 && [ -f "$PKG/winebridge/portalcheck.c" ]; then
+    gcc -O2 "$PKG/winebridge/portalcheck.c" -I/usr/include/libusb-1.0 -o "$pc" -lusb-1.0 2>>"$LOG" || true
+  fi
+  [ -x "$pc" ] && out="$("$pc" 1 2>&1)"
+  echo "$out" >>"$LOG"
+  case "$out" in
+    *"wrap_sys_device -> 0"*) PORTAL_MSG="Portal detected and working." ;;
+    *"Permission denied"*)    PORTAL_MSG="Portal found but no access yet — unplug and replug it once (udev rule was just installed)." ;;
+    *"no sysfs match"*|"")     PORTAL_MSG="Portal not plugged in — that's fine, plug it in and replug once when you play." ;;
+    *)                          PORTAL_MSG="Portal check inconclusive — see $LOG." ;;
+  esac
+  return 0
+}
+
 finish(){ : > "$STAMP"; }
 launch(){ export FUNKEY_BRIDGE_DIR="$USERLIB/winebridge"; exec /usr/lib/funkeyone/funkeyone.sh; }
 
-# ---- GUI mode: zenity progress bar + one pkexec password prompt -------------
+if [ "${1:-}" = "--self-test" ]; then
+  SUDO=sudo
+  step_game || { echo "FAIL: step_game"; exit 1; }
+  step_mega || { echo "FAIL: step_mega"; exit 1; }
+  h="$(find_home)"
+  [ -f "$h/RadicaGame/FunkeyOne.exe" ] || { echo "FAIL: FunkeyOne.exe missing"; exit 1; }
+  [ -f "$h/MegaByte/MegaByte.exe" ]    || { echo "FAIL: MegaByte.exe missing"; exit 1; }
+  echo "OK: client + MegaByte extracted at $h"; exit 0
+fi
+
+if [ "${1:-}" = "--run-all" ]; then
+  SUDO=sudo
+  say(){ printf '\n==> %s\n' "$*"; }
+  say "deps";    step_deps   || { echo "FAIL: deps (see $LOG)";   exit 11; }
+  say "bridge";  step_bridge || { echo "FAIL: bridge (see $LOG)"; exit 12; }
+  say "dotnet";  step_dotnet || { echo "FAIL: dotnet (see $LOG)"; exit 13; }
+  say "game";    step_game   || { echo "FAIL: game (see $LOG)";   exit 14; }
+  say "mega";    step_mega   || { echo "FAIL: mega (see $LOG)";   exit 15; }
+  say "fixes";   step_fixes  || { echo "FAIL: fixes (see $LOG)";  exit 16; }
+  say "portal";  step_portal || true
+  finish
+  echo "ALL DONE. $PORTAL_MSG"
+  exit 0
+fi
+
 if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v zenity >/dev/null 2>&1 && command -v pkexec >/dev/null 2>&1; then
   SUDO=pkexec
   if [ -z "$(find_home)" ]; then
     zenity --question --width=500 --title="U.B. Funkeys — first run" \
-      --text="This installs Wine and .NET, and downloads the game (~900 MB) from funkeyone.com.\n\nYou'll be asked for your password once, and the game's own installer window will appear — just click through it (Next → Install → Done).\n\nContinue?" || exit 1
+      --text="This installs Wine and .NET, downloads the game (~900 MB) and the installer, and sets everything up.\n\nYou'll be asked for your password once. It's all automatic — no game-installer window to click through.\n\nContinue?" || exit 1
   fi
   (
-    echo "# Installing Wine and dependencies…";                       step_deps   >>"$LOG" 2>&1 || exit 11
-    echo "# Building the USB portal bridge…";                         step_bridge >>"$LOG" 2>&1 || exit 12
-    echo "# Installing .NET 4.8 (this takes several minutes)…";       step_dotnet >>"$LOG" 2>&1 || exit 13
-    echo "# Installing the game — click through the installer window…"; step_game >>"$LOG" 2>&1 || exit 14
-    echo "# Applying the fixes…";                                     step_fixes  >>"$LOG" 2>&1 || exit 15
-    echo "# Done!"
-  ) | zenity --progress --pulsate --auto-close --no-cancel --width=500 \
+    echo "5";  echo "# Installing Wine and dependencies…";                step_deps   >>"$LOG" 2>&1 || exit 11
+    echo "15"; echo "# Building the USB portal bridge…";                  step_bridge >>"$LOG" 2>&1 || exit 12
+    echo "25"; echo "# Installing .NET 4.8 (this takes several minutes)…"; step_dotnet >>"$LOG" 2>&1 || exit 13
+    echo "45"; echo "# Downloading the game and extracting the client…";  step_game   >>"$LOG" 2>&1 || exit 14
+    echo "80"; echo "# Installing the MegaByte portal reader…";           step_mega   >>"$LOG" 2>&1 || exit 15
+    echo "88"; echo "# Applying the Wine fixes…";                         step_fixes  >>"$LOG" 2>&1 || exit 16
+    echo "95"; echo "# Checking the USB portal…";                         step_portal >>"$LOG" 2>&1 || true
+    echo "100"; echo "# Done!"
+  ) | zenity --progress --auto-close --no-cancel --width=500 \
              --title="Setting up U.B. Funkeys" --text="Starting…"
   rc=${PIPESTATUS[0]}
   if [ "$rc" != 0 ]; then
@@ -108,11 +224,10 @@ if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v zenity >/dev/null 2>&
   fi
   finish
   [ "$LAUNCH_AFTER" = 1 ] && launch
-  zenity --info --width=360 --title="U.B. Funkeys" --text="Setup complete — have fun!" 2>/dev/null || true
+  zenity --info --width=380 --title="U.B. Funkeys" --text="Setup complete — have fun!\n\n$PORTAL_MSG" 2>/dev/null || true
   exit 0
 fi
 
-# ---- terminal fallback (no display / no zenity / no pkexec) -----------------
 if [ ! -t 1 ]; then
   INNER="exec \"$SELF\" ${1:-}"
   for t in x-terminal-emulator gnome-terminal konsole xfce4-terminal mate-terminal \
@@ -132,9 +247,11 @@ die(){ printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; read -rp "Press Enter to 
 say "Installing Wine and dependencies (password needed)"; step_deps   || die "Wine install failed (see $LOG)"
 say "Building the USB portal bridge";                     step_bridge || die "bridge build failed (see $LOG)"
 say "Installing .NET 4.8 (slow)";                         step_dotnet || die ".NET install failed (see $LOG)"
-say "Installing the game — click through the installer";  step_game   || die "game install failed (see $LOG)"
-say "Applying the fixes";                                 step_fixes  || die "fixes failed (see $LOG)"
+say "Downloading the game and extracting the client";     step_game   || die "game setup failed (see $LOG)"
+say "Installing the MegaByte portal reader";              step_mega   || die "MegaByte install failed (see $LOG)"
+say "Applying the Wine fixes";                            step_fixes  || die "fixes failed (see $LOG)"
+say "Checking the USB portal";                            step_portal || true
 finish
-say "✅ Done!"
+say "✅ Done! — $PORTAL_MSG"
 [ "$LAUNCH_AFTER" = 1 ] && launch
 read -rp "Setup complete. Press Enter to close…" _ 2>/dev/null || true

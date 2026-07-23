@@ -2,15 +2,18 @@
 # Build a self-bootstrapping .deb for Debian/Ubuntu.
 # Produces funkeyone-wine_<ver>_amd64.deb.
 #
-# Design (see the note in README): a .deb CANNOT install Wine or build a
-# per-user Wine prefix during its own dpkg install (root, no user session, apt
-# lock held). So this package installs light, and the FIRST time the user
-# launches "U.B. Funkeys" it auto-runs funkeyone-setup, which installs Wine +
-# all deps (one password prompt), sets up the prefix, installs the game and
-# applies the fixes, then launches. Two double-clicks, zero typed commands.
+# Ships ONLY our own code — the native USB daemon + a PE libusb proxy, the
+# Flash/ninput shims, the launcher, the udev rule, an icon and the setup
+# scripts. NO game or Adobe binaries are packaged: on first launch,
+# funkeyone-setup downloads the game and EXTRACTS the revival client out of the
+# user's own installer (extract-payload.py). The user supplies the game.
+#
+# A .deb CANNOT install Wine or build a per-user Wine prefix during its own
+# dpkg install (root, no user session, apt lock held), so the package installs
+# light and the FIRST launch runs funkeyone-setup (one password prompt).
 #
 # Works without dpkg-deb (a .deb is just an `ar` archive). Needs: ar (binutils),
-# tar, and x86_64-w64-mingw32-gcc to prebuild the two PE shims.
+# tar, python3, and x86_64-w64-mingw32-gcc to prebuild the PE shims + proxy.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 VER="${1:-1.0.0}"
@@ -20,11 +23,13 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 msg(){ printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 
-# ---- 1. prebuild the portable PE shims --------------------------------------
-msg "Building PE shims (mingw)"
+# ---- 1. prebuild the PE shims + the PE libusb proxy (mingw) ------------------
+msg "Building PE shims + libusb proxy (mingw)"
 command -v x86_64-w64-mingw32-gcc >/dev/null || { echo "need mingw-w64 gcc"; exit 1; }
 ( cd "$REPO/wineflash"  && ./build.sh >/dev/null )
 ( cd "$REPO/wineninput" && ./build.sh >/dev/null )
+x86_64-w64-mingw32-gcc -O2 -shared "$REPO/packaging/winebridge/libusb_pe.c" \
+    -o "$STAGE/libusb-1.0.dll" -lws2_32
 
 # ---- 2. data tree -----------------------------------------------------------
 msg "Staging package tree"
@@ -37,32 +42,34 @@ install -d "$D/usr/bin" \
           "$D/usr/share/applications" \
           "$D/usr/share/doc/$PKGNAME"
 
-install -m755 "$REPO/funkeyone.sh"               "$D/usr/lib/funkeyone/funkeyone.sh"
-install -m644 "$REPO/winebridge/bridge.c"        "$D/usr/lib/funkeyone/winebridge/"
-install -m644 "$REPO/winebridge/bridge_unix.c"   "$D/usr/lib/funkeyone/winebridge/"
-install -m644 "$REPO/winebridge/libusb-1.0.spec" "$D/usr/lib/funkeyone/winebridge/"
-install -m644 "$REPO/wineflash/flashshim.dll"    "$D/usr/lib/funkeyone/wineflash/"
-install -m644 "$REPO/wineninput/ninput.dll"      "$D/usr/lib/funkeyone/wineninput/"
-install -m644 "$REPO/70-funkeys-hub.rules"       "$D/lib/udev/rules.d/70-funkeys-hub.rules"
-install -m644 "$REPO/README.md"                  "$D/usr/share/doc/$PKGNAME/README.md"
+# launcher (daemon variant) + the native-bridge sources built on first run
+install -m755 "$REPO/packaging/files/funkeyone.sh"      "$D/usr/lib/funkeyone/funkeyone.sh"
+install -m644 "$REPO/packaging/winebridge/funkeyusbd.c" "$D/usr/lib/funkeyone/winebridge/"
+install -m644 "$REPO/packaging/winebridge/bridge_unix.c" "$D/usr/lib/funkeyone/winebridge/"
+install -m644 "$REPO/packaging/winebridge/portalcheck.c" "$D/usr/lib/funkeyone/winebridge/"
+install -m644 "$STAGE/libusb-1.0.dll"                   "$D/usr/lib/funkeyone/winebridge/libusb-1.0.dll"
+# prebuilt PE shims (our code)
+install -m644 "$REPO/wineflash/flashshim.dll"           "$D/usr/lib/funkeyone/wineflash/"
+install -m644 "$REPO/wineninput/ninput.dll"             "$D/usr/lib/funkeyone/wineninput/"
+# udev rule + docs
+install -m644 "$REPO/70-funkeys-hub.rules"              "$D/lib/udev/rules.d/70-funkeys-hub.rules"
+install -m644 "$REPO/README.md"                         "$D/usr/share/doc/$PKGNAME/README.md"
 
 # ---- runtime scripts (editable files under packaging/files/) ---------------
-install -m755 "$REPO/packaging/files/funkeyone"       "$D/usr/bin/funkeyone"
-install -m755 "$REPO/packaging/files/funkeyone-setup" "$D/usr/bin/funkeyone-setup"
-install -m755 "$REPO/packaging/files/install-deps.sh" "$D/usr/lib/funkeyone/install-deps.sh"
+install -m755 "$REPO/packaging/files/funkeyone"        "$D/usr/bin/funkeyone"
+install -m755 "$REPO/packaging/files/funkeyone-setup"  "$D/usr/bin/funkeyone-setup"
+install -m755 "$REPO/packaging/files/install-deps.sh"  "$D/usr/lib/funkeyone/install-deps.sh"
+install -m755 "$REPO/packaging/files/extract-payload.py" "$D/usr/lib/funkeyone/extract-payload.py"
 
 # ---- icon --------------------------------------------------------------------
-# Fetch the FunkeyOne logo at BUILD time and ship it as a named icon, so the
-# menu entry has an icon immediately (no runtime download, no fragile .ico).
-# It is fetched, not committed, so no game asset lives in the repo. Falls back
-# to a stock icon name if offline.
+# Fetch the FunkeyOne logo at BUILD time and ship it as a named icon (no runtime
+# download, no fragile .ico). Fetched, not committed. Falls back to a stock name.
 ICON=applications-games
 install -d "$D/usr/share/pixmaps"
 if curl -fsSL -o "$D/usr/share/pixmaps/funkeyone.png" \
         "https://www.funkeyone.com/images/funkeyone.png" 2>/dev/null \
    && [ -s "$D/usr/share/pixmaps/funkeyone.png" ]; then
   ICON=funkeyone
-  # a properly-sized themed copy too, if ImageMagick is available
   if command -v magick >/dev/null 2>&1; then
     install -d "$D/usr/share/icons/hicolor/256x256/apps"
     magick "$D/usr/share/pixmaps/funkeyone.png" -background none -gravity center \
@@ -81,6 +88,7 @@ Exec=funkeyone
 Icon=$ICON
 Terminal=false
 Categories=Game;
+StartupWMClass=funkeyone.exe
 EOF
 cat > "$D/usr/share/applications/funkeyone-setup.desktop" <<EOF
 [Desktop Entry]
@@ -95,17 +103,20 @@ NoDisplay=false
 EOF
 
 cat > "$D/usr/share/doc/$PKGNAME/copyright" <<'EOF'
-Original support code (Wine shims, launcher, udev rule) for running the
-third-party U.B. Funkeys / FunkeyOne game under Wine. No game assets and no
-Adobe Flash are included; the user supplies the game.
+Original support code (native USB daemon + PE libusb proxy, Wine shims,
+launcher, udev rule, payload extractor) for running the third-party U.B.
+Funkeys / FunkeyOne game under Wine. No game assets and no Adobe Flash are
+included or distributed; the user supplies the game, and the revival client is
+extracted on the user's machine from the user's own installer.
 EOF
 
 # ---- 3. control -------------------------------------------------------------
 msg "Writing control metadata"
 C="$STAGE/control"; install -d "$C"
 SIZE_KB="$(du -sk "$D" | cut -f1)"
-# Deliberately light Depends so the .deb ALWAYS installs on one double-click.
-# Wine + the heavy bits are installed by funkeyone-setup on first launch.
+# Light Depends so the .deb ALWAYS installs on one double-click. gcc +
+# libusb-1.0-0-dev build the native daemon on first run; python3 + unzip drive
+# the payload extraction; Wine itself is installed by funkeyone-setup.
 cat > "$C/control" <<EOF
 Package: $PKGNAME
 Version: $VER
@@ -114,14 +125,15 @@ Priority: optional
 Architecture: amd64
 Maintainer: FunkeyOne on Linux <nobody@example.com>
 Installed-Size: $SIZE_KB
-Depends: sudo, xdg-user-dirs
+Depends: sudo, xdg-user-dirs, pkexec | policykit-1, zenity, curl, wget, unzip, ca-certificates, python3, gcc, libusb-1.0-0-dev
 Description: U.B. Funkeys (FunkeyOne) under Wine, with USB portal support
  Installs a small support layer for running the FunkeyOne U.B. Funkeys revival
- under Wine with a physical USB portal: a libusb bridge, a Flash de-licensing
- shim, an ninput stub and a udev rule. The first time you launch "U.B. Funkeys"
- it installs Wine and all dependencies, sets up the Wine prefix, installs the
- game and applies the fixes automatically (one password prompt) — then plays.
- The game itself is supplied by you (not included) for copyright reasons.
+ under Wine with a physical USB portal: a native libusb daemon plus a PE proxy,
+ a Flash de-licensing shim, an ninput stub and a udev rule. The first time you
+ launch "U.B. Funkeys" it installs Wine and all dependencies, sets up the Wine
+ prefix, downloads the game, extracts the revival client from your installer and
+ applies the fixes automatically (one password prompt) — then plays.
+ No game assets are included; you supply the game, for copyright reasons.
 EOF
 
 cat > "$C/postinst" <<'EOF'
@@ -153,9 +165,8 @@ echo "2.0" > "$STAGE/debian-binary"
 ( cd "$D" && tar --owner=0 --group=0 -czf "$STAGE/data.tar.gz" ./* )
 rm -f "$OUT"
 # Assemble the .deb as a canonical ar archive ourselves — works on any build
-# host (no dpkg-deb needed) and gives identical output. Member names are
-# space-padded with NO trailing slash (GNU `ar` adds a slash that stricter
-# dpkg tooling rejects).
+# host (no dpkg-deb needed). Member names are space-padded with NO trailing
+# slash (GNU `ar` adds a slash that stricter dpkg tooling rejects).
 python3 - "$OUT" "$STAGE/debian-binary" "$STAGE/control.tar.gz" "$STAGE/data.tar.gz" <<'PY'
 import sys
 out, members = sys.argv[1], sys.argv[2:]

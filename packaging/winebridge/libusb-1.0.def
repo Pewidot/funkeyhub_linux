@@ -1,0 +1,13 @@
+LIBRARY libusb-1.0.dll
+EXPORTS
+libusb_init
+libusb_exit
+libusb_open_device_with_vid_pid
+libusb_close
+libusb_claim_interface
+libusb_release_interface
+libusb_kernel_driver_active
+libusb_detach_kernel_driver
+libusb_control_transfer
+libusb_interrupt_transfer
+libusb_error_name

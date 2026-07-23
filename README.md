@@ -44,22 +44,21 @@ The package is tiny and barely depends on anything, so the install itself always
 goes through. The real work happens the first time you open "U.B. Funkeys" from
 the menu. A progress window walks through installing Wine, setting up the prefix
 with .NET, downloading the game, and applying the fixes. You'll get one password
-prompt for the Wine install, and the app icon is pulled from the site's favicon.
-
-Partway through, the game's own installer opens. When it does:
-
-* untick the Start Menu and Desktop shortcut options,
-* don't install the hub/portal driver,
-* click "No" if it offers to download .NET or Visual C++,
-* and don't tick "Launch FunkeyOne" at the end. Just close the window.
-
-There's a dialog that reminds you of all this right before the installer shows
-up.
+prompt for the Wine install, and that's it — no game-installer window to click
+through, nothing to untick. It downloads the game, pulls the FunkeyOne client
+straight out of the installer, and sets everything up on its own.
 
 It's two steps (install the package, then launch once) because a `.deb` install
-runs as root with no desktop session, so it can't build your Wine prefix or run
-the game's installer. That part has to run as you, on first launch. After that
-the menu entry just starts the game.
+runs as root with no desktop session, so it can't build your Wine prefix or set
+the game up. That part has to run as you, on first launch. After that the menu
+entry just starts the game.
+
+The package itself carries no game or Adobe files. On first launch it downloads
+the game and extracts the FunkeyOne client (the game exe, Flash, the portal
+reader) from the installer it fetches — so you always supply the game, it's
+never shipped in the package. On this path the USB bridge is a small native
+daemon talking to the game over a socket, instead of the winelib module the
+other distros build, which means it doesn't care what Wine version you have.
 
 ### Other distros
 

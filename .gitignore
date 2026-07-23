@@ -4,8 +4,6 @@
 # The U.B. Funkeys / FunkeyOne installer and any extracted game data
 UBFunkeys-Setup-x64.exe
 *Setup*.exe
-# The ripped web player (Adobe SWF content, Ruffle, Comic Sans fonts, art)
-play/
 # Adobe Flash Player control and any Flash content (Adobe copyright)
 *.ocx
 *.swf
@@ -15,6 +13,12 @@ play/
 MegaByte_log.txt
 # App icon — fetched from funkeyone.com's favicon at install time, not shipped
 *.ico
+# Installer/payload bundles that carry game + Adobe binaries (never redistribute).
+# The revival client is EXTRACTED from the user's own installer at install time.
+Funkeyone-installer-linux.zip
+ClientPayload.zip
+*Full*Game*.zip
+*Full_Game*.zip
 
 # ============================================================================
 # Build artifacts — rebuilt from source by setup.sh / the build.sh scripts.
@@ -34,6 +38,8 @@ MegaByte_log.txt
 # winebridge / wineflash scratch outputs
 winebridge/portalcheck
 winebridge/decoy
+packaging/winebridge/funkeyusbd
+packaging/winebridge/portalcheck
 wineflash/original_inprocserver32.txt
 
 # ============================================================================
